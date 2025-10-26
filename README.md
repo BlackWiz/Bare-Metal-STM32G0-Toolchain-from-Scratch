@@ -1,63 +1,131 @@
-Bare-Metal STM32G0 Toolchain from Scratch
+# Bare-Metal STM32G0 Toolchain
 
-This project is a complete, professional bare-metal development environment for the STM32G071RB (Nucleo-G0) board, 
-built entirely from the ground up without relying on vendor IDEs like Keil or STM32CubeIDE.
+A complete bare-metal development setup for the STM32G071RB (Nucleo-G0) board. No vendor IDEs, no HAL libraries—just ARM GCC, Make, and a text editor.
 
-This repository demonstrates a deep, low-level understanding of the embedded software build process, from the first line of assembly 
-to a fully debuggable C application.
+## Why This Exists
 
-Key Features & Skills Demonstrated
+Most STM32 projects start with STM32CubeIDE or Keil, which hide the build process behind layers of abstraction. This project does the opposite: every file is written from scratch to show exactly how embedded software gets built.
 
-This project isn't just a "blinky" program; it's the engine used to build the program. 
-The key components are:
-Custom Toolchain Setup: Configured a complete cross-compilation toolchain using ARM GCC, MSYS2, and Make.
+**What's included:**
+- Custom startup code in C (not assembly)
+- Hand-written linker script for memory layout
+- Professional Makefile with preprocessing and disassembly targets
+- VS Code configuration for debugging with OpenOCD
 
-Advanced Makefile: A fully-featured Makefile that handles:
+## Hardware
 
-Automatic dependency generation (.o from .c).
+- **Board:** STM32 Nucleo-G071RB
+- **MCU:** STM32G071RB (Cortex-M0+, 128KB Flash, 36KB RAM)
+- **Debugger:** ST-LINK/V2-1 (built into the board)
 
-Multi-stage builds (compile, link).
+## Requirements
 
-Separate targets for preprocessing (make preprocess), assembly (make assembly), and disassembly (make disasm).
+You'll need these tools in your PATH:
 
-Easy cleanup (make clean).
+- `arm-none-eabi-gcc` - ARM GCC compiler
+- `make` - Build automation (use MSYS2 on Windows)
+- `openocd` - For flashing and debugging
 
-C-Based Startup File (startup.c): Replaced the vendor's assembly startup code with a custom, readable C implementation. 
-This file correctly sets up the vector table and initializes RAM before calling main().
+For VS Code, install the **C/C++** and **Cortex-Debug** extensions.
 
-Custom Linker Script (Linker.ld): A from-scratch linker script that precisely maps all code (.text), data (.data), 
-and uninitialized variables (.bss) to the STM32G0's specific FLASH and RAM addresses.
+## Building
 
-System Call Implementation (syscalls.c): Provided stubs for C library functions (like _sbrk, _write, etc.) to satisfy the linker in a bare-metal environment.
+```bash
+make              # Compile and link everything
+make clean        # Remove build artifacts
+make disasm       # Generate human-readable disassembly
+```
 
-VS Code Integration: A fully configured setup for professional development and debugging:
-tasks.json: Provides a seamless build experience (via Ctrl+Shift+B).
+The Makefile also has `preprocess` and `assembly` targets if you want to see what the compiler does at each stage.
 
-launch.json: Enables one-click hardware debugging (F5) using OpenOCD and GDB.
+## Debugging
 
-c_cpp_properties.json: Configured for perfect IntelliSense and code navigation.
+Connect the board via USB, open the project in VS Code, and press F5. OpenOCD will flash the firmware and start a debug session. Set breakpoints, step through code, inspect variables—the usual stuff.
 
-Hardware Required
-Board: Nucleo-G071RB
+## Project Structure
 
-Toolchain & Setup (How to Use)
-To clone and build this project, you will need the following tools installed and available in your system's PATH:
-ARM GCC Compiler: (arm-none-eabi-gcc)
-MSYS2: To provide make and other build utilities.
-OpenOCD: For debugging.
-VS Code: With the C/C++ and Cortex-Debug extensions.
+```
+main.c          Your application code
+startup.c       Vector table and initialization code
+syscalls.c      Minimal C library stubs for bare-metal
+Linker.ld       Memory map (where code and data go)
+Makefile        Build rules
+.vscode/        Editor and debugger config
+```
 
-Once the environment is set up, you can use the following commands from the terminal:
+## How It Works
 
-# Build the final firmware.elf
-make
+### Boot Sequence
 
-# Clean the project directory
-make clean
+```
+Power On
+   |
+   v
+[Vector Table @ 0x08000000]
+   |
+   ├─> Load Stack Pointer
+   └─> Jump to Reset_Handler()
+          |
+          v
+   [startup.c: Reset_Handler()]
+          |
+          ├─> Copy .data from Flash to RAM
+          ├─> Zero out .bss in RAM
+          └─> Call main()
+```
 
-# Generate a human-readable disassembly of the final program
-make disasm
+When the STM32 boots, it reads the vector table from the start of flash (0x08000000). The first entry is the initial stack pointer, the second is the reset handler address.
 
-How to Debug
-Connect the Nucleo board via USB.
-In VS Code, press F5 to start a debug session.
+### Memory Layout
+
+```
+FLASH (128KB)              RAM (36KB)
+┌──────────────────┐       ┌──────────────────┐
+│ Vector Table     │ 0x08000000
+├──────────────────┤       │                  │
+│ .text (code)     │       │                  │
+│                  │       ├──────────────────┤
+├──────────────────┤       │ .data (init)     │ 0x20000000
+│ .rodata (const)  │       ├──────────────────┤
+├──────────────────┤       │ .bss (zeroed)    │
+│ .data (initial)  │       ├──────────────────┤
+└──────────────────┘       │ Heap             │
+                            │        ↓         │
+                            │        ↑         │
+                            │ Stack            │
+                            └──────────────────┘ 0x20009000
+```
+
+The linker script (`Linker.ld`) tells the linker where to place each section. Code and constants go in flash. Initialized data gets stored in flash but copied to RAM at startup. The BSS section (uninitialized globals) just gets zeroed in RAM.
+
+### Build Process
+
+```
+main.c ──┐
+         ├─> [Compile] ─> main.o ──┐
+startup.c ┤                         ├─> [Link with Linker.ld] ─> firmware.elf
+         ├─> [Compile] ─> startup.o ┤
+syscalls.c ┘                        │
+                                    └─> [objdump -d] ─> firmware.asm
+```
+
+The Makefile compiles each `.c` file to a `.o` object file, then links them together using the memory layout defined in `Linker.ld` to produce the final `.elf` executable.
+
+## Customization
+
+To use a different STM32, you'll need to:
+1. Update memory sizes in `Linker.ld`
+2. Adjust the vector table in `startup.c`
+3. Change the MCU flags in the Makefile
+
+The `.vscode/launch.json` file also needs the correct OpenOCD config files for your board.
+
+## References
+
+- [STM32G071 Reference Manual](https://www.st.com/resource/en/reference_manual/rm0444-stm32g0x1-advanced-armbased-32bit-mcus-stmicroelectronics.pdf)
+- [GNU Linker Documentation](https://sourceware.org/binutils/docs/ld/)
+- [ARM Cortex-M0+ TRM](https://developer.arm.com/documentation/ddi0484/latest/)
+
+---
+
+This project was built to understand embedded toolchains from the ground up. If you're learning embedded systems or want to see how vendor tools work under the hood, this might be useful.
